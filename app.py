@@ -3,20 +3,19 @@ from flask import Flask, render_template_string, request, jsonify, redirect, url
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, current_user, logout_user
 from flask_admin import Admin, AdminIndexView
+from flask_admin.theme import Bootstrap4Theme
 from flask_admin.contrib.sqla import ModelView
 from werkzeug.security import generate_password_hash, check_password_hash
 from groq import Groq
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'iniesta_secure_v2026')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///iniesta_prod.db').replace("postgres://", "postgresql://")
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///iniesta.db').replace("postgres://", "postgresql://")
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Fetches key from Render Environment Variables to prevent GitHub security alerts
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-MODEL_ID = "llama-3.3-70b-versatile" 
-
 client = Groq(api_key=GROQ_API_KEY)
+
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
@@ -45,7 +44,7 @@ class MyAdminIndexView(AdminIndexView):
     def inaccessible_callback(self, name, **kwargs):
         return redirect(url_for('login'))
 
-admin = Admin(app, name='INIESTA PANEL', index_view=MyAdminIndexView(), template_mode='bootstrap4')
+admin = Admin(app, name='INIESTA PANEL', index_view=MyAdminIndexView(), theme=Bootstrap4Theme())
 admin.add_view(ModelView(User, db.session))
 admin.add_view(ModelView(ChatMessage, db.session))
 
@@ -208,12 +207,12 @@ def chat_view():
 def chat_api():
     user_msg = request.json.get('message')
     db.session.add(ChatMessage(user_id=current_user.id, role='user', content=user_msg))
-    history = [{"role": "system", "content": "You are INIESTA AI. Assist directly. No narration."}]
+    history = [{"role": "system", "content": "You are INIESTA. Direct assistant. No narration."}]
     past_msgs = ChatMessage.query.filter_by(user_id=current_user.id).order_by(ChatMessage.id.desc()).limit(12).all()
     for m in reversed(past_msgs):
         history.append({"role": m.role, "content": m.content})
     try:
-        res = client.chat.completions.create(model=MODEL_ID, messages=history)
+        res = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=history)
         reply = res.choices[0].message.content
         db.session.add(ChatMessage(user_id=current_user.id, role='assistant', content=reply))
         db.session.commit()
@@ -224,5 +223,5 @@ def chat_api():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
