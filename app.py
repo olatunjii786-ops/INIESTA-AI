@@ -207,7 +207,7 @@ def chat_view():
 def chat_api():
     user_msg = request.json.get('message')
     db.session.add(ChatMessage(user_id=current_user.id, role='user', content=user_msg))
-    history = [{"role": "system", "content": "You are INIESTA. Direct assistant. No narration."}]
+    history = [{"role": "system", "content": "You are INIESTA AI. Assist directly. No narration."}]
     past_msgs = ChatMessage.query.filter_by(user_id=current_user.id).order_by(ChatMessage.id.desc()).limit(12).all()
     for m in reversed(past_msgs):
         history.append({"role": m.role, "content": m.content})
@@ -220,8 +220,12 @@ def chat_api():
     except Exception as e:
         return jsonify({"reply": "Error: " + str(e)}), 500
 
+@app.teardown_appcontext
+def shutdown_session(exception=None):
+    db.session.remove()
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
