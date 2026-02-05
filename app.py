@@ -44,7 +44,7 @@ class MyAdminIndexView(AdminIndexView):
     def inaccessible_callback(self, name, **kwargs):
         return redirect(url_for('login'))
 
-admin = Admin(app, name='INIESTA PANEL', index_view=MyAdminIndexView(), template_mode='bootstrap4')
+admin = Admin(app, name='INIESTA PANEL', index_view=MyAdminIndexView())
 admin.add_view(ModelView(User, db.session))
 admin.add_view(ModelView(ChatMessage, db.session))
 
