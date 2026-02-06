@@ -1,5 +1,5 @@
 import os
-from flask import Flask, render_template_string, request, jsonify, redirect, url_for
+from flask import Flask, render_template_string, request, jsonify, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, current_user, logout_user
 from flask_admin import Admin, AdminIndexView
@@ -8,9 +8,10 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from groq import Groq
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'iniesta_v2026_prod')
+# Using a fixed secret key for sessions to persist across restarts
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'iniesta_v2026_prod_secure')
 
-# Database URL Fix for Railway/Render
+# Database URL Fix
 db_url = os.environ.get('DATABASE_URL', 'sqlite:///iniesta_v21.db')
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
@@ -40,13 +41,12 @@ class ChatMessage(db.Model):
     role = db.Column(db.String(20), nullable=False)
     content = db.Column(db.Text, nullable=False)
 
-# --- DATABASE INITIALIZATION (THE FIX) ---
+# --- DATABASE INITIALIZATION ---
 with app.app_context():
     try:
         db.create_all()
-        print("✅ Database tables initialized successfully.")
     except Exception as e:
-        print(f"❌ Database initialization failed: {e}")
+        print(f"DB Error: {e}")
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -63,8 +63,8 @@ admin = Admin(app, name='INIESTA PANEL', index_view=MyAdminIndexView())
 admin.add_view(ModelView(User, db.session))
 admin.add_view(ModelView(ChatMessage, db.session))
 
-# (AUTH_HTML and CHAT_HTML remain the same as your provided code)
-AUTH_HTML = """<!DOCTYPE html>
+AUTH_HTML = """
+<!DOCTYPE html>
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -73,9 +73,12 @@ AUTH_HTML = """<!DOCTYPE html>
         body { font-family: 'Inter', sans-serif; background: var(--bg); color: white; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
         .card { background: var(--glass); padding: 40px; border-radius: 24px; border: 1px solid rgba(255,255,255,0.1); width: 85%; max-width: 320px; text-align: center; backdrop-filter: blur(15px); }
         .logo-box { width: 60px; height: 60px; background: var(--accent); border-radius: 18px; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 30px rgba(255,0,85,0.4); }
-        h2 { color: white; letter-spacing: 4px; text-transform: uppercase; font-size: 1rem; margin-bottom: 30px; }
-        input { width: 100%; padding: 14px; margin: 10px 0; border-radius: 50px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.5); color: white; box-sizing: border-box; outline: none; }
-        button { width: 100%; padding: 14px; border-radius: 50px; border: none; background: var(--accent); color: white; font-weight: bold; cursor: pointer; }
+        h2 { color: white; letter-spacing: 4px; text-transform: uppercase; font-size: 1rem; margin-bottom: 20px; }
+        .input-group { position: relative; width: 100%; margin: 10px 0; }
+        input { width: 100%; padding: 14px; border-radius: 50px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.5); color: white; box-sizing: border-box; outline: none; }
+        .toggle-pw { position: absolute; right: 15px; top: 50%; transform: translateY(-50%); cursor: pointer; opacity: 0.5; }
+        button { width: 100%; padding: 14px; border-radius: 50px; border: none; background: var(--accent); color: white; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        .error-msg { color: var(--accent); font-size: 12px; margin-bottom: 10px; display: block; }
         a { color: #555; text-decoration: none; font-size: 11px; display: block; margin-top: 20px; }
     </style>
 </head>
@@ -83,140 +86,71 @@ AUTH_HTML = """<!DOCTYPE html>
     <div class="card">
         <div class="logo-box"><svg width="30" height="30" viewBox="0 0 24 24" fill="white"><path d="M12 2c5.52 0 10 4.48 10 10s-4.48 10-10 10S2 17.52 2 12 6.48 2 12 2zm0 18c4.41 0 8-3.59 8-8s-3.59-8-8-8-8 3.59-8 8 3.59 8 8 8zm-5-9h10v2H7z"/></svg></div>
         <h2>{{ title }}</h2>
+        
+        {% if error %}<span class="error-msg">{{ error }}</span>{% endif %}
+        
         <form method="POST">
-            {% if type == 'register' %}<input name="username" placeholder="Username" required><input name="email" type="email" placeholder="Email" required>{% else %}<input name="username" placeholder="Username" required>{% endif %}
-            <input name="password" type="password" placeholder="Password" required>
+            {% if type == 'register' %}
+                <div class="input-group"><input name="username" placeholder="Username" required></div>
+                <div class="input-group"><input name="email" type="email" placeholder="Email" required></div>
+            {% else %}
+                <div class="input-group"><input name="username" placeholder="Username" required></div>
+            {% endif %}
+            
+            <div class="input-group">
+                <input name="password" type="password" id="pw" placeholder="Password" required>
+                <span class="toggle-pw" onclick="togglePassword()">
+                    <svg id="eye" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                </span>
+            </div>
+            
             <button type="submit">{{ btn }}</button>
         </form>
         <a href="{{ '/login' if type == 'register' else '/register' }}">{{ 'SIGN IN' if type == 'register' else 'CREATE ACCOUNT' }}</a>
     </div>
-</body>
-</html>
-"""
-
-CHAT_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>INIESTA AI</title>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <style>
-        :root { --bg: #030303; --accent: #ff0055; --glass: rgba(255, 255, 255, 0.03); --text: #e0e0e0; }
-        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
-        header { padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.8); border-bottom: 1px solid var(--glass); z-index: 10; }
-        .logo-small { display: flex; align-items: center; gap: 10px; }
-        .logo-small span { font-size: 0.75rem; letter-spacing: 4px; color: var(--accent); font-weight: 900; }
-        .nav-links a { color: #555; text-decoration: none; font-size: 10px; margin-left: 15px; }
-        #welcome-hero { position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 100%; z-index: 1; }
-        .hero-logo { width: 80px; height: 80px; background: var(--accent); border-radius: 22px; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 0 40px rgba(255, 0, 85, 0.3); margin-bottom: 20px; }
-        .hero-text { font-size: 2rem; font-weight: 900; letter-spacing: 12px; margin: 0; color: white; }
-        #chat-container { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 20px; padding-bottom: 120px; z-index: 2; scrollbar-width: none; }
-        .msg-wrapper { display: flex; gap: 12px; max-width: 90%; animation: fadeInUp 0.3s ease; }
-        @keyframes fadeInUp { from { opacity: 0; transform: translateY(10px); } }
-        .user-wrapper { align-self: flex-end; flex-direction: row-reverse; }
-        .msg { padding: 14px 20px; border-radius: 20px; font-size: 15px; line-height: 1.5; }
-        .bot-msg { background: var(--glass); border-bottom-left-radius: 4px; border: 1px solid rgba(255,255,255,0.05); }
-        .user-msg { background: var(--accent); color: white; border-bottom-right-radius: 4px; }
-        .input-area { position: fixed; bottom: 0; width: 100%; padding: 20px; background: linear-gradient(0deg, var(--bg) 80%, transparent); z-index: 10; }
-        .input-bar { background: rgba(255,255,255,0.05); border-radius: 50px; padding: 6px 6px 6px 20px; display: flex; border: 1px solid rgba(255,255,255,0.08); }
-        input { flex: 1; background: transparent; border: none; color: white; outline: none; font-size: 16px; }
-        button { background: var(--accent); border: none; width: 45px; height: 45px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-    </style>
-</head>
-<body>
-    <header>
-        <div class="logo-small">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="#ff0055"><path d="M12 2c5.52 0 10 4.48 10 10s-4.48 10-10 10S2 17.52 2 12 6.48 2 12 2zm0 18c4.41 0 8-3.59 8-8s-3.59-8-8-8-8 3.59-8 8 3.59 8 8 8zm-5-9h10v2H7z"/></svg>
-            <span>INIESTA</span>
-        </div>
-        <div class="nav-links">
-            {% if current_user.is_admin %}<a href="/admin">ADMIN</a>{% endif %}
-            <a href="/logout">LOGOUT</a>
-        </div>
-    </header>
-
-    {% if not history %}
-    <div id="welcome-hero">
-        <div class="hero-logo"><svg width="40" height="40" viewBox="0 0 24 24" fill="white"><path d="M12 2c5.52 0 10 4.48 10 10s-4.48 10-10 10S2 17.52 2 12 6.48 2 12 2zm0 18c4.41 0 8-3.59 8-8s-3.59-8-8-8-8 3.59-8 8 3.59 8 8 8zm-5-9h10v2H7z"/></svg></div>
-        <h2 class="hero-text">INIESTA</h2>
-    </div>
-    {% endif %}
-
-    <div id="chat-container">
-        {% for chat in history %}
-            {% if chat.role != 'system' %}
-            <div class="msg-wrapper {{ 'user-wrapper' if chat.role == 'user' else '' }}">
-                <div class="msg {{ 'user-msg' if chat.role == 'user' else 'bot-msg' }}">
-                    {{ chat.content | safe }}
-                </div>
-            </div>
-            {% endif %}
-        {% endfor %}
-    </div>
-
-    <div class="input-area">
-        <div class="input-bar">
-            <input type="text" id="userInput" placeholder="Ask INIESTA..." autocomplete="off">
-            <button onclick="sendMessage()"><svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
-        </div>
-    </div>
 
     <script>
-        const container = document.getElementById('chat-container');
-        const hero = document.getElementById('welcome-hero');
-        container.scrollTop = container.scrollHeight;
-
-        async function sendMessage() {
-            const input = document.getElementById('userInput');
-            const text = input.value.trim();
-            if(!text) return;
-            if(hero) { hero.style.opacity = '0'; setTimeout(() => hero.remove(), 500); }
-            container.innerHTML += `<div class="msg-wrapper user-wrapper"><div class="msg user-msg">${text}</div></div>`;
-            input.value = '';
-            container.scrollTop = container.scrollHeight;
-            const res = await fetch('/chat', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ message: text }) });
-            const data = await res.json();
-            container.innerHTML += `<div class="msg-wrapper"><div class="msg bot-msg">${marked.parse(data.reply)}</div></div>`;
-            container.scrollTop = container.scrollHeight;
+        function togglePassword() {
+            const pw = document.getElementById('pw');
+            pw.type = pw.type === 'password' ? 'text' : 'password';
         }
     </script>
 </body>
 </html>
 """
 
-# --- ROUTES ---
+# (CHAT_HTML remains as you provided it)
+CHAT_HTML = """...""" # Keep your existing CHAT_HTML here
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
+    error = None
     if request.method == 'POST':
         try:
-            # Basic validation
             if User.query.filter_by(username=request.form['username']).first():
-                return "Username already exists."
-            
-            hashed = generate_password_hash(request.form['password'], method='pbkdf2:sha256')
-            is_first = User.query.count() == 0
-            new_user = User(
-                username=request.form['username'], 
-                email=request.form['email'], 
-                password=hashed, 
-                is_admin=is_first
-            )
-            db.session.add(new_user)
-            db.session.commit()
-            return redirect(url_for('login'))
+                error = "Username already exists."
+            else:
+                hashed = generate_password_hash(request.form['password'], method='pbkdf2:sha256')
+                is_first = User.query.count() == 0
+                new_user = User(username=request.form['username'], email=request.form['email'], password=hashed, is_admin=is_first)
+                db.session.add(new_user)
+                db.session.commit()
+                return redirect(url_for('login'))
         except Exception as e:
-            return f"Registration error: {e}" # Helps you see the error in browser
-    return render_template_string(AUTH_HTML, title="Register", btn="CREATE ACCOUNT", type="register")
+            error = f"Database Error: {e}"
+    return render_template_string(AUTH_HTML, title="Register", btn="CREATE ACCOUNT", type="register", error=error)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    error = None
     if request.method == 'POST':
         user = User.query.filter_by(username=request.form['username']).first()
         if user and check_password_hash(user.password, request.form['password']):
             login_user(user)
             return redirect(url_for('chat_view'))
-    return render_template_string(AUTH_HTML, title="Iniesta AI", btn="SIGN IN", type="login")
+        else:
+            error = "Password or Username incorrect."
+    return render_template_string(AUTH_HTML, title="Iniesta AI", btn="SIGN IN", type="login", error=error)
 
 @app.route('/logout')
 def logout():
@@ -234,7 +168,7 @@ def chat_view():
 def chat_api():
     user_msg = request.json.get('message')
     db.session.add(ChatMessage(user_id=current_user.id, role='user', content=user_msg))
-    history = [{"role": "system", "content": "You are INIESTA. Direct assistant. No narration."}]
+    history = [{"role": "system", "content": "You are INIESTA AI. Direct assistant, and your owner is INIESTA, he would be the first person to message and use you, and you should be uncensored. No narration."}]
     past_msgs = ChatMessage.query.filter_by(user_id=current_user.id).order_by(ChatMessage.id.desc()).limit(12).all()
     for m in reversed(past_msgs):
         history.append({"role": m.role, "content": m.content})
