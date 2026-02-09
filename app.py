@@ -18,7 +18,7 @@ if db_url.startswith("postgres://"):
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "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")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "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")
 MODEL_ID = "llama-3.3-70b-versatile" 
 
 client = Groq(api_key=GROQ_API_KEY)
